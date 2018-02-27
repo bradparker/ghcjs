@@ -90,8 +90,11 @@ setupTests :: FilePath -> IO ()
 setupTests tmpDir = do
   args <- getArgs
   (testArgs, leftoverArgs) <-
-    case runP (runParser AllowOpts optParser args) (prefs idm) of
-      (Left err, _ctx)    -> error ("error parsing arguments: " ++ show err)
+    case runP (runParser AllowOpts CmdStart optParser args) (prefs idm) of
+      (Left err, _ctx) ->
+        case err of
+          (ErrorMsg str) -> error ("error parsing arguments: " ++ str)
+          _ -> error ("error parsing arguments: unknown")
       (Right (a,l), _ctx) -> return (a,l)
   when (taHelp testArgs) $ do
     defaultMainWithArgs [] ["--help"] `C.catch` \(e::ExitCode) -> return ()
@@ -100,6 +103,7 @@ setupTests tmpDir = do
   let ghcjs      = fromString (taWithGhcjs testArgs)
       ghcjsPkg   = fromString (taWithGhcjsPkg testArgs)
       runhaskell = fromString (taWithRunhaskell testArgs)
+  putStrLn (show ghcjs)
   checkBooted ghcjs
   testDir       <- maybe (getTestDir ghcjs) (return . fromString) (taWithTests testArgs)
   nodePgm       <- checkProgram "node" (taWithNode testArgs)           ["--help"]
@@ -313,13 +317,8 @@ instance FromJSON TestSuite where
 testCaseLog :: TestOpts -> TestName -> Assertion -> Test
 testCaseLog opts name assertion = testCase name assertion'
   where
-    assertion'   = assertion `C.catch` \e@(HUnitFailure msg) -> do
-      let errMsg = listToMaybe (filter (not . null) (lines msg))
-          err    = name ++ maybe "" (\x -> " (" ++ trunc (dropName x) ++ ")") errMsg
-          trunc xs | length xs > 43 = take 40 xs ++ "..."
-                   | otherwise = xs
-          dropName xs | name `isPrefixOf` xs = drop (length name) xs
-                      | otherwise            = xs
+    assertion'   = assertion `C.catch` \e@(HUnitFailure _ msg) -> do
+      let err = show e
       modifyIORef (failedTests opts) (err:)
       C.throwIO e
 {-
